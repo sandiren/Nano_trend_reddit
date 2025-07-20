@@ -34,29 +34,34 @@ def get_google_autocomplete(seed):
 
 def get_etsy_listings(keyword):
     try:
-        url = f"https://www.etsy.com/search?q={keyword.replace(' ', '+')}"
+        search_url = f"https://www.etsy.com/search?q={keyword.replace(' ', '+')}"
         headers = {'User-Agent': 'Mozilla/5.0'}
-        r = requests.get(url, headers=headers)
+        r = requests.get(search_url, headers=headers)
         soup = BeautifulSoup(r.text, 'html.parser')
         count_el = soup.find('span', class_='wt-display-inline-flex-sm')
-        return count_el.text.strip() if count_el else "N/A"
+        count_text = count_el.text.strip() if count_el else "N/A"
+        return count_text, search_url
     except:
-        return "N/A"
+        return "Link to Etsy", search_url
 
 def search_reddit_posts(keyword, limit=10):
-    titles = []
+    results = []
     try:
         for post in reddit.subreddit("all").search(keyword, sort="relevance", limit=limit):
-            titles.append(post.title)
+            results.append({
+                "title": post.title,
+                "url": f"https://www.reddit.com{post.permalink}"
+            })
     except Exception as e:
         st.error(f"Reddit search error: {e}")
-    return titles
+    return results
 
 def count_reddit_mentions(keyword, subreddit="all", limit=100):
     mentions = 0
     try:
+        pattern = re.compile(re.escape(keyword), re.IGNORECASE)
         for post in reddit.subreddit(subreddit).search(keyword, limit=limit):
-            if keyword.lower() in post.title.lower():
+            if pattern.search(post.title):
                 mentions += 1
     except Exception as e:
         st.error(f"Reddit mention count error: {e}")
@@ -71,14 +76,32 @@ def score_niche(etsy_text, reddit_mentions):
 
 def suggest_product(keyword):
     k = keyword.lower()
-    if "template" in k or "planner" in k:
-        return "🧾 Create a Notion or Canva template"
-    elif "checklist" in k:
-        return "✅ Make a printable checklist"
-    elif "prompt" in k:
-        return "🧠 Bundle AI or ChatGPT prompts"
+    if any(term in k for term in ["template", "planner", "notion", "spreadsheet"]):
+        return "🧾 Create a customizable Notion or Google Sheets template"
+
+    elif any(term in k for term in ["checklist", "routine", "habit"]):
+        return "✅ Make a stylish printable checklist or habit tracker"
+
+    elif any(term in k for term in ["prompt", "chatgpt", "ai", "llm","journaling"]):
+        return "🧠 Sell a ChatGPT prompt pack or digital journaling workbook"
+
+    elif any(term in k for term in ["manifest", "vision", "goal", "intention"]):
+        return "🔮 Offer a manifestation board, vision planner, or goal setting workbook"
+
+    elif any(term in k for term in ["budget", "finance", "savings"]):
+        return "💰 Build a budget tracker or financial planning spreadsheet"
+
+    elif any(term in k for term in ["sticker", "icon", "clipart", "keychain"]):
+        return "🎨 Create printable clipart, SVGs, or custom physical product mockups"
+
+    elif any(term in k for term in ["calendar", "schedule", "planner"]):
+        return "🗓️ Build a digital or printable calendar planner"
+
+    elif any(term in k for term in ["study", "notes", "school"]):
+        return "📚 Make academic study templates or revision planners"
+
     else:
-        return "🎯 Create a niche digital download or workbook"
+        return "🎯 Create a high-converting printable, workbook, or toolkit based on niche interest"
 
 # === MAIN APP LOGIC ===
 if query_input:
@@ -88,24 +111,41 @@ if query_input:
 
     results = []
     for s in selected:
-        etsy = get_etsy_listings(s)
+        etsy, etsy_url = get_etsy_listings(s)
         reddit_hits = count_reddit_mentions(s)
-        niche_score = score_niche(etsy, reddit_hits)
+        try:
+            niche_score = score_niche(etsy, reddit_hits)
+        except:
+            niche_score = 0
         idea = suggest_product(s)
         results.append({
             "keyword": s,
             "etsy_listings": etsy,
+            "etsy_url": etsy_url,
             "reddit_mentions": reddit_hits,
             "score": niche_score,
             "suggestion": idea
         })
 
     df = pd.DataFrame(results)
-    st.dataframe(df.sort_values("score", ascending=False))
+    if "score" in df.columns:
+        for _, row in df.sort_values("score", ascending=False).iterrows():
+            st.markdown(f"""
+        **🔑 {row['keyword']}**
+
+        🛒 Etsy Listings: [{row['etsy_listings']}]({row['etsy_url']})  
+        🗣 Reddit Mentions: {row['reddit_mentions']}  
+        📈 Niche Score: `{row['score']}`  
+        🎯 Product Suggestion: {row['suggestion']}
+
+        ---
+        """, unsafe_allow_html=True)
+    else:
+        st.dataframe(df)
 
     st.download_button("📥 Download as CSV", df.to_csv(index=False), "niche_report.csv", "text/csv")
 
     st.subheader("🗣 Reddit Posts Matching Your Keyword")
     reddit_posts = search_reddit_posts(query_input)
-    for t in reddit_posts:
-        st.write("•", t)
+    for post in reddit_posts:
+        st.markdown(f"• [{post['title']}]({post['url']})", unsafe_allow_html=True)
